@@ -1,8 +1,12 @@
 /*
 
 Required Variables:
+(udp server)
+  udp:                 StatsD UDP server mode
+  udpPort:             StatsD UDP Server listening port [default: 8125]
 
-  port:             StatsD listening port [default: 8125]
+(udp server)
+  udpPort:             StatsD listening port
 
 Graphite Required Variables:
 
@@ -18,8 +22,8 @@ Optional Variables:
   debug:            debug flag [default: false]
   port:             port to listen for messages on over UDP [default: 8125]
   address:          ip to listen for messages on over UDP [default: 0.0.0.0]
-  mgmt_port:        port to run the management TCP interface on [default: 8126]
-  mgmt_address:     ip to run the management TCP interface on [default: 0.0.0.0]
+  mgmtPort:        port to run the management TCP interface on [default: 8127]
+  mgmtAddress:     ip to run the management TCP interface on [default: 0.0.0.0]
   debugInterval:    interval to print debug information [ms, default: 10000]
   dumpMessages:     log all incoming messages
   flushInterval:    interval (in ms) to flush to Graphite
@@ -35,5 +39,7 @@ Optional Variables:
 {
   graphitePort: 2003
 , graphiteHost: "graphite.host.com"
-, port: 8125
+, udp: true
+, tcp: true
+, mgmt: true,
 }

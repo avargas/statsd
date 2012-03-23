@@ -1,14 +1,16 @@
 var dgram  = require('dgram')
   , util    = require('util')
   , net    = require('net')
-  , config = require('./config')
+  , configLoader = require('./config')
   , fs     = require('fs')
 
 var keyCounter = {};
 var counters = {};
 var timers = {};
 var gauges = {};
-var debugInt, flushInt, keyFlushInt, server, mgmtServer;
+var config;
+var debugInt, flushInt, keyFlushInt, keyFlushInterval, flushInterval, pctThreshold;
+var udpServer, tcpServer, mgmtServer;
 var startup_time = Math.round(new Date().getTime() / 1000);
 
 var stats = {
@@ -23,6 +25,9 @@ var stats = {
 };
 
 function parseMessage (msg) {
+  if (config.dumpMessages) { 
+    util.log(msg.trim().toString()); 
+  }
   var bits = msg.toString().split(':');
   var key = bits.shift()
                 .replace(/\s+/g, '_')
@@ -69,7 +74,9 @@ function parseMessage (msg) {
   stats['messages']['last_msg_seen'] = Math.round(new Date().getTime() / 1000);
 }
 
-config.configFile(process.argv[2], function (config, oldConfig) {
+configLoader.configFile(process.argv[2], function (conf, oldConfig) {
+  config = conf;
+
   if (! config.debug && debugInt) {
     clearInterval(debugInt);
     debugInt = false;
@@ -84,15 +91,45 @@ config.configFile(process.argv[2], function (config, oldConfig) {
     }, config.debugInterval || 10000);
   }
 
-  if (server === undefined) {
+  // close udp, tcp and management servers if they are running
+  if (udpServer) {
+    udpServer.close();
+  }
 
-    // key counting
-    var keyFlushInterval = Number((config.keyFlush && config.keyFlush.interval) || 0);
+  if (tcpServer) {
+    tcpServer.close();
+  }
 
-    server = dgram.createSocket('udp4', function (msg, rinfo) {
-      if (config.dumpMessages) { util.log(msg.toString()); }
-      parseMessage(msg.toString());
+  if (mgmtServer) {
+    mgmtServer.close();
+  }
+
+  // re-create servers
+  if (config.udp) {
+    util.log('starting udp server');
+
+    udpServer = dgram.createSocket('udp4', function (msg, rinfo) {
+        parseMessage(msg.toString());
     });
+
+    udpServer.bind(config.udpPort || 8125, config.udpAddress || undefined);
+  }
+
+  if (config.tcp) {
+    util.log('starting tcp server');
+
+    tcpServer = net.createServer(function(stream) {
+      stream.setEncoding('ascii');
+      stream.on('data', function (data) {
+        parseMessage(data);
+      });
+    });
+
+    tcpServer.listen(config.tcpPort || 8126, config.tcpAddress || undefined);
+  }
+
+  if (config.mgmt) {
+    util.log('starting management server');
 
     mgmtServer = net.createServer(function(stream) {
       stream.setEncoding('ascii');
@@ -180,18 +217,24 @@ config.configFile(process.argv[2], function (config, oldConfig) {
       });
     });
 
-    server.bind(config.port || 8125, config.address || undefined);
-    mgmtServer.listen(config.mgmt_port || 8126, config.mgmt_address || undefined);
+    mgmtServer.listen(config.mgmtPort || 8127, config.mgmtAddress || undefined);
+  }
 
-    util.log("server is up");
+  if (!config.udp && !config.tcp) {
+    throw new Error("TCP nor UDP were configured");
+  }
 
-    var flushInterval = Number(config.flushInterval || 10000);
+  util.log("server is up");
 
-    var pctThreshold = config.percentThreshold || 90;
-    if (!Array.isArray(pctThreshold)) {
-      pctThreshold = [ pctThreshold ]; // listify percentiles so single values work the same
-    }
+  keyFlushInterval = Number((config.keyFlush && config.keyFlush.interval) || 0);
+  flushInterval = Number(config.flushInterval || 10000);
+  pctThreshold = config.percentThreshold || 90;
 
+  if (!Array.isArray(pctThreshold)) {
+    pctThreshold = [ pctThreshold ]; // listify percentiles so single values work the same
+  }
+
+  if (!flushInt) {
     flushInt = setInterval(function () {
       var statString = '';
       var ts = Math.round(new Date().getTime() / 1000);
